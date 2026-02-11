@@ -1,0 +1,8 @@
+{
+  "name": "GestureFlow 3D",
+  "description": "A futuristic 3D photo wheel controlled by hand gestures using MediaPipe, featuring AI-generated descriptions via Gemini.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
