@@ -8,13 +8,17 @@ interface CarouselProps {
   items: PhotoItem[];
   perspective: number;
   tilt: number;
+  isMuted: boolean;
 }
 
-const CarouselItem: React.FC<{ item: PhotoItem; isSelected: boolean; angle: number }> = ({ item, isSelected, angle }) => {
+const CarouselItem: React.FC<{ item: PhotoItem; isSelected: boolean; angle: number; isGlobalMuted: boolean }> = ({ item, isSelected, angle, isGlobalMuted }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (item.type === 'video' && videoRef.current) {
+      // Sync mute state immediately
+      videoRef.current.muted = isGlobalMuted;
+
       if (isSelected) {
         // Attempt to play
         const playPromise = videoRef.current.play();
@@ -29,7 +33,7 @@ const CarouselItem: React.FC<{ item: PhotoItem; isSelected: boolean; angle: numb
         videoRef.current.currentTime = 0;
       }
     }
-  }, [isSelected, item.type]);
+  }, [isSelected, item.type, isGlobalMuted]);
 
   return (
     <div
@@ -48,7 +52,7 @@ const CarouselItem: React.FC<{ item: PhotoItem; isSelected: boolean; angle: numb
           ref={videoRef}
           src={item.url} 
           className="w-full h-full object-contain pointer-events-none select-none bg-black"
-          muted
+          // We remove the static 'muted' prop and control it via ref/effect to allow unmuting
           loop
           playsInline
         />
@@ -75,7 +79,7 @@ const CarouselItem: React.FC<{ item: PhotoItem; isSelected: boolean; angle: numb
   );
 };
 
-const Carousel: React.FC<CarouselProps> = ({ rotation, selectedIndex, items, perspective, tilt }) => {
+const Carousel: React.FC<CarouselProps> = ({ rotation, selectedIndex, items, perspective, tilt, isMuted }) => {
   const theta = 360 / items.length;
 
   const style = useMemo(() => ({
@@ -102,6 +106,7 @@ const Carousel: React.FC<CarouselProps> = ({ rotation, selectedIndex, items, per
               item={item}
               isSelected={isSelected}
               angle={angle}
+              isGlobalMuted={isMuted}
             />
           );
         })}

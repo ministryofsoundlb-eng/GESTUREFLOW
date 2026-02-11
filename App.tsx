@@ -3,7 +3,7 @@ import Carousel from './components/Carousel';
 import HandController from './components/HandController';
 import { PHOTO_ITEMS } from './constants';
 import { GestureType, PhotoItem } from './types';
-import { ArrowLeft, ArrowRight, MousePointer2, Upload, Edit3, Check, X, Eye, EyeOff, Image as ImageIcon, Trash2, Film, Monitor, Rotate3D } from 'lucide-react';
+import { ArrowLeft, ArrowRight, MousePointer2, Upload, Edit3, Check, X, Eye, EyeOff, Image as ImageIcon, Trash2, Film, Monitor, Volume2, VolumeX } from 'lucide-react';
 
 const App: React.FC = () => {
   const [items, setItems] = useState<PhotoItem[]>(PHOTO_ITEMS);
@@ -18,6 +18,9 @@ const App: React.FC = () => {
   // View Settings State
   const [perspective, setPerspective] = useState(1000);
   const [tilt, setTilt] = useState(0);
+
+  // Sound State
+  const [isMuted, setIsMuted] = useState(true);
 
   // Editing state
   const [isEditing, setIsEditing] = useState(false);
@@ -144,6 +147,7 @@ const App: React.FC = () => {
           items={items} 
           perspective={perspective}
           tilt={tilt}
+          isMuted={isMuted}
         />
       </div>
 
@@ -404,6 +408,20 @@ const App: React.FC = () => {
              >
                <Monitor className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
                <span className="hidden md:inline">View</span>
+             </button>
+
+             {/* Sound Toggle Button */}
+             <button 
+               onClick={() => setIsMuted(!isMuted)}
+               className={`flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-600 px-4 py-2 rounded-full text-sm font-semibold transition-all shadow-lg group ${!isMuted ? 'text-cyan-400' : 'text-gray-400'}`}
+               title={isMuted ? "Unmute Sound" : "Mute Sound"}
+             >
+               {isMuted ? (
+                 <VolumeX className="w-4 h-4 group-hover:scale-110 transition-transform" />
+               ) : (
+                 <Volume2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
+               )}
+               <span className="hidden md:inline">Sound</span>
              </button>
            </div>
 
