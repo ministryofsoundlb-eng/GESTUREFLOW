@@ -3,7 +3,7 @@ import Carousel from './components/Carousel';
 import HandController from './components/HandController';
 import { PHOTO_ITEMS } from './constants';
 import { GestureType, PhotoItem } from './types';
-import { ArrowLeft, ArrowRight, MousePointer2, Upload, Edit3, Check, X, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, ArrowRight, MousePointer2, Upload, Edit3, Check, X, Eye, EyeOff, Image as ImageIcon, Trash2, Film, Monitor, Rotate3D } from 'lucide-react';
 
 const App: React.FC = () => {
   const [items, setItems] = useState<PhotoItem[]>(PHOTO_ITEMS);
@@ -11,12 +11,25 @@ const App: React.FC = () => {
   const [rotation, setRotation] = useState(0);
   const [showControls, setShowControls] = useState(true);
   
+  // Custom Background State
+  const [bgImage, setBgImage] = useState<string | null>(null);
+  const [bgText, setBgText] = useState<string>('GESTURE FLOW');
+
+  // View Settings State
+  const [perspective, setPerspective] = useState(1000);
+  const [tilt, setTilt] = useState(0);
+
   // Editing state
   const [isEditing, setIsEditing] = useState(false);
+  const [isEditingBg, setIsEditingBg] = useState(false);
+  const [isEditingView, setIsEditingView] = useState(false);
+  
   const [editTitle, setEditTitle] = useState('');
   const [editTheme, setEditTheme] = useState('');
-
+  
+  // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bgInputRef = useRef<HTMLInputElement>(null);
 
   const theta = 360 / items.length;
 
@@ -31,7 +44,7 @@ const App: React.FC = () => {
   }, [items.length, theta]);
 
   const handleGesture = (gesture: GestureType) => {
-    if (isEditing) return; // Disable gestures while editing
+    if (isEditing || isEditingBg || isEditingView) return; // Disable gestures while editing
     if (gesture === GestureType.SWIPE_LEFT) {
       rotateNext();
     } else if (gesture === GestureType.SWIPE_RIGHT) {
@@ -42,24 +55,40 @@ const App: React.FC = () => {
   const handleUploadClick = () => {
     fileInputRef.current?.click();
   };
+  
+  const handleBgUploadClick = () => {
+    bgInputRef.current?.click();
+  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const newUrl = URL.createObjectURL(file);
+      const isVideo = file.type.startsWith('video/');
+      const fileType = isVideo ? 'video' : 'image';
+      
       setItems((prevItems) => {
         const newItems = [...prevItems];
         newItems[selectedIndex] = {
           ...newItems[selectedIndex],
           url: newUrl,
-          title: file.name.split('.')[0] || "Custom Image", // Use filename as title
-          theme: "User Upload"
+          title: file.name.split('.')[0] || "Custom Media",
+          theme: "User Upload",
+          type: fileType
         };
         return newItems;
       });
     }
     // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleBgFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setBgImage(URL.createObjectURL(file));
+    }
+    if (bgInputRef.current) bgInputRef.current.value = '';
   };
 
   const startEditing = () => {
@@ -82,21 +111,46 @@ const App: React.FC = () => {
     setIsEditing(false);
   };
 
+  const isModalOpen = isEditing || isEditingBg || isEditingView;
+
   return (
     <div className="relative w-screen h-screen bg-[#050505] overflow-hidden flex flex-col">
-      {/* Background Gradient Mesh */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-900/20 blur-[100px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-cyan-900/20 blur-[100px]" />
+      {/* Dynamic Background Layer */}
+      {bgImage ? (
+        <div className="absolute inset-0 z-0">
+          <img src={bgImage} alt="Background" className="w-full h-full object-cover opacity-60" />
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"></div>
+        </div>
+      ) : (
+        /* Default Gradient Mesh */
+        <div className="absolute inset-0 pointer-events-none z-0">
+          <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-900/20 blur-[100px]" />
+          <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-cyan-900/20 blur-[100px]" />
+        </div>
+      )}
+      
+      {/* Background Text Layer */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 overflow-hidden">
+         <h1 className="text-[12vw] font-black text-white/5 whitespace-nowrap tracking-tighter select-none transform scale-y-150 blur-sm">
+            {bgText}
+         </h1>
       </div>
 
       {/* Main Content Area */}
       <div className="relative z-10 flex-1 flex items-center justify-center">
-        <Carousel rotation={rotation} selectedIndex={selectedIndex} items={items} />
+        <Carousel 
+          rotation={rotation} 
+          selectedIndex={selectedIndex} 
+          items={items} 
+          perspective={perspective}
+          tilt={tilt}
+        />
       </div>
 
-      {/* Hand Controller (Bottom Right) */}
-      {!isEditing && <HandController onGesture={handleGesture} />}
+      {/* Hand Controller (Bottom Right) - Always mounted, hidden via CSS if modal open to prevent restart */}
+      <div className={isModalOpen ? "opacity-0 pointer-events-none" : "opacity-100"}>
+         <HandController onGesture={handleGesture} />
+      </div>
 
       {/* Visibility Toggle Button (Bottom Left) */}
       <button 
@@ -107,20 +161,27 @@ const App: React.FC = () => {
         {showControls ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
       </button>
 
-      {/* Hidden File Input */}
+      {/* Hidden File Inputs */}
       <input 
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileChange} 
+        accept="image/*,video/*" 
+        className="hidden" 
+      />
+      <input 
+        type="file" 
+        ref={bgInputRef} 
+        onChange={handleBgFileChange} 
         accept="image/*" 
         className="hidden" 
       />
 
-      {/* Edit Modal Overlay */}
+      {/* Edit Image Modal Overlay */}
       {isEditing && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-gray-900 border border-gray-700 p-6 rounded-2xl w-[90%] max-w-md shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-xl font-bold text-white mb-4">Edit Image Details</h2>
+            <h2 className="text-xl font-bold text-white mb-4">Edit Details</h2>
             
             <div className="space-y-4">
               <div>
@@ -165,27 +226,184 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Manual Controls & Upload - Hide when editing OR showControls is false */}
-      {!isEditing && showControls && (
+      {/* Edit Background Modal Overlay */}
+      {isEditingBg && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 p-6 rounded-2xl w-[90%] max-w-md shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-bold text-white mb-4">Background Settings</h2>
+            
+            <div className="space-y-6">
+              {/* Background Image Control */}
+              <div>
+                <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">Background Image</label>
+                <div className="flex gap-3">
+                   <button 
+                     onClick={handleBgUploadClick}
+                     className="flex-1 flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 border-dashed rounded-lg py-3 transition-colors"
+                   >
+                     <Upload className="w-4 h-4 text-cyan-400" />
+                     <span className="text-sm text-gray-300">Upload Image</span>
+                   </button>
+                   {bgImage && (
+                     <button 
+                        onClick={() => setBgImage(null)}
+                        className="p-3 bg-red-900/30 hover:bg-red-900/50 border border-red-900 rounded-lg text-red-400 transition-colors"
+                        title="Remove Background Image"
+                     >
+                       <Trash2 className="w-4 h-4" />
+                     </button>
+                   )}
+                </div>
+              </div>
+
+              {/* Background Text Control */}
+              <div>
+                <label className="block text-xs text-gray-400 uppercase tracking-wider mb-1">Background Text</label>
+                <input 
+                  type="text" 
+                  value={bgText}
+                  onChange={(e) => setBgText(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  placeholder="Enter background text..."
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button 
+                onClick={() => setIsEditingBg(false)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold transition-colors shadow-lg shadow-cyan-900/20 w-full justify-center"
+              >
+                <Check className="w-4 h-4" />
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit View/Perspective Modal Overlay */}
+      {isEditingView && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 p-6 rounded-2xl w-[90%] max-w-md shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-bold text-white mb-4">View Perspective</h2>
+            
+            <div className="space-y-6">
+              {/* Perspective Slider */}
+              <div>
+                <div className="flex justify-between mb-2">
+                  <label className="text-xs text-gray-400 uppercase tracking-wider">Depth (Perspective)</label>
+                  <span className="text-xs text-cyan-400">{perspective}px</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="200" 
+                  max="2000" 
+                  step="50"
+                  value={perspective}
+                  onChange={(e) => setPerspective(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+                <p className="text-[10px] text-gray-500 mt-1">Controls the 3D depth intensity.</p>
+              </div>
+
+              {/* Tilt Slider */}
+              <div>
+                <div className="flex justify-between mb-2">
+                   <label className="text-xs text-gray-400 uppercase tracking-wider">Vertical Tilt</label>
+                   <span className="text-xs text-cyan-400">{tilt}°</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="-45" 
+                  max="45" 
+                  step="1"
+                  value={tilt}
+                  onChange={(e) => setTilt(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+                <p className="text-[10px] text-gray-500 mt-1">Rotate the wheel up or down.</p>
+              </div>
+
+              {/* Presets */}
+              <div className="flex gap-2 justify-center pt-2">
+                 <button 
+                   onClick={() => { setPerspective(1000); setTilt(0); }}
+                   className="text-xs px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded border border-gray-600 text-gray-400"
+                 >
+                   Reset
+                 </button>
+                 <button 
+                   onClick={() => { setPerspective(600); setTilt(15); }}
+                   className="text-xs px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded border border-gray-600 text-gray-400"
+                 >
+                   Dramatic
+                 </button>
+                 <button 
+                   onClick={() => { setPerspective(2000); setTilt(-10); }}
+                   className="text-xs px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded border border-gray-600 text-gray-400"
+                 >
+                   Flat
+                 </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button 
+                onClick={() => setIsEditingView(false)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold transition-colors shadow-lg shadow-cyan-900/20 w-full justify-center"
+              >
+                <Check className="w-4 h-4" />
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Controls - Hide when editing OR showControls is false */}
+      {!isEditing && !isEditingBg && !isEditingView && showControls && (
         <div className="absolute bottom-12 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-6 z-30 w-full px-4 animate-in slide-in-from-bottom-10 fade-in duration-300">
           
            <div className="flex gap-4">
              {/* Upload Button */}
              <button 
                onClick={handleUploadClick}
-               className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-600 px-5 py-2 rounded-full text-sm font-semibold transition-all shadow-lg group"
+               className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-600 px-4 py-2 rounded-full text-sm font-semibold transition-all shadow-lg group"
+               title="Replace Selected Content"
              >
-               <Upload className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
-               <span>Replace Image</span>
+               {items[selectedIndex].type === 'video' ? <Film className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" /> : <Upload className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />}
+               <span className="hidden md:inline">Media</span>
              </button>
 
              {/* Edit Text Button */}
              <button 
                onClick={startEditing}
-               className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-600 px-5 py-2 rounded-full text-sm font-semibold transition-all shadow-lg group"
+               className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-600 px-4 py-2 rounded-full text-sm font-semibold transition-all shadow-lg group"
+               title="Edit Text"
              >
                <Edit3 className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
-               <span>Edit Text</span>
+               <span className="hidden md:inline">Text</span>
+             </button>
+
+             {/* Background Settings Button */}
+             <button 
+               onClick={() => setIsEditingBg(true)}
+               className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-600 px-4 py-2 rounded-full text-sm font-semibold transition-all shadow-lg group"
+               title="Edit Background"
+             >
+               <ImageIcon className="w-4 h-4 text-green-400 group-hover:scale-110 transition-transform" />
+               <span className="hidden md:inline">Background</span>
+             </button>
+
+             {/* View Perspective Button */}
+             <button 
+               onClick={() => setIsEditingView(true)}
+               className="flex items-center gap-2 bg-gray-800/80 hover:bg-gray-700 backdrop-blur-md border border-gray-600 px-4 py-2 rounded-full text-sm font-semibold transition-all shadow-lg group"
+               title="Adjust Perspective"
+             >
+               <Monitor className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
+               <span className="hidden md:inline">View</span>
              </button>
            </div>
 
@@ -212,16 +430,6 @@ const App: React.FC = () => {
            </div>
         </div>
       )}
-
-      {/* Header / Branding */}
-      <div className="absolute top-0 left-0 w-full p-6 z-30 flex justify-between items-start pointer-events-none">
-         <div>
-            <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 tracking-tighter">
-              GESTURE FLOW
-            </h1>
-            <p className="text-xs text-gray-400 tracking-[0.2em] uppercase">Touchless Interface v2.0</p>
-         </div>
-      </div>
 
     </div>
   );

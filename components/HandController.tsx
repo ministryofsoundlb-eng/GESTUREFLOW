@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
 import { GestureType } from '../types';
 import { SWIPE_THRESHOLD, COOLDOWN_MS } from '../constants';
-import { Camera, RefreshCw } from 'lucide-react';
+import { Camera, RefreshCw, Minus, ChevronUp } from 'lucide-react';
 
 interface HandControllerProps {
   onGesture: (gesture: GestureType) => void;
@@ -15,6 +15,7 @@ const HandController: React.FC<HandControllerProps> = ({ onGesture }) => {
   const [error, setError] = useState<string | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [isMinimized, setIsMinimized] = useState(false);
   
   // Logic refs
   const lastGestureTime = useRef<number>(0);
@@ -22,6 +23,13 @@ const HandController: React.FC<HandControllerProps> = ({ onGesture }) => {
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const requestRef = useRef<number | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
+  
+  // Keep track of minimized state for the animation loop without stale closures
+  const isMinimizedRef = useRef(isMinimized);
+
+  useEffect(() => {
+    isMinimizedRef.current = isMinimized;
+  }, [isMinimized]);
 
   useEffect(() => {
     let active = true;
@@ -117,7 +125,7 @@ const HandController: React.FC<HandControllerProps> = ({ onGesture }) => {
     const canvas = canvasRef.current;
     const handLandmarker = handLandmarkerRef.current;
 
-    if (!video || !canvas || !handLandmarker) return;
+    if (!video || !handLandmarker) return;
     
     // Ensure video is playing
     if (video.paused || video.ended) {
@@ -126,39 +134,70 @@ const HandController: React.FC<HandControllerProps> = ({ onGesture }) => {
         return;
     }
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Adjust canvas size to match video
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+    const startTimeMs = performance.now();
+    let results;
+    try {
+        results = handLandmarker.detectForVideo(video, startTimeMs);
+    } catch (e) {
+        console.error("Detection error:", e);
     }
 
-    const startTimeMs = performance.now();
-    const results = handLandmarker.detectForVideo(video, startTimeMs);
-
-    ctx.save();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw landmarks
-    if (results.landmarks) {
-      const drawingUtils = new DrawingUtils(ctx);
+    // 1. Always process gestures (Detection)
+    if (results?.landmarks) {
       for (const landmarks of results.landmarks) {
-        drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
-          color: "#22d3ee",
-          lineWidth: 2
-        });
-        drawingUtils.drawLandmarks(landmarks, {
-          color: "#ffffff",
-          lineWidth: 1,
-          radius: 3
-        });
-        
         detectGesture(landmarks);
       }
     }
-    ctx.restore();
+
+    // 2. Visualization (Only when not minimized)
+    // We only update the canvas if the UI is visible.
+    // If minimized, we skip drawing to save GPU/CPU, but tracking continues.
+    if (!isMinimizedRef.current && canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        // Match canvas size to video
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+           canvas.width = video.videoWidth;
+           canvas.height = video.videoHeight;
+        }
+
+        ctx.save();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw video frame manually because the video element is hidden
+        ctx.save();
+        ctx.scale(-1, 1); // Mirror flip
+        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+        ctx.restore();
+
+        // Draw landmarks
+        if (results?.landmarks) {
+          const drawingUtils = new DrawingUtils(ctx);
+          for (const landmarks of results.landmarks) {
+            // We need to mirror the landmarks logic visually if drawingUtils doesn't handle context scale
+            // But since we want the whole canvas mirrored, the CSS transform on canvas handles the visual flip.
+            // Wait: DrawingUtils draws based on normalized coordinates (0-1).
+            // If the canvas is CSS transformed scale-x-[-1], we should draw normally.
+            
+            // Revert the manual flip above for simplicity:
+            // Actually, let's just clear and draw video normally.
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
+              color: "#22d3ee",
+              lineWidth: 2
+            });
+            drawingUtils.drawLandmarks(landmarks, {
+              color: "#ffffff",
+              lineWidth: 1,
+              radius: 3
+            });
+          }
+        }
+        ctx.restore();
+      }
+    }
 
     requestRef.current = requestAnimationFrame(predictWebcam);
   };
@@ -188,65 +227,101 @@ const HandController: React.FC<HandControllerProps> = ({ onGesture }) => {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50">
-      <div className="relative bg-black/80 border border-gray-700 rounded-2xl overflow-hidden w-[240px] h-[220px] shadow-2xl backdrop-blur-sm flex flex-col">
-        {/* Header/Controls */}
-        <div className="h-10 bg-gray-900 border-b border-gray-700 flex items-center justify-between px-3">
-             <div className="flex items-center gap-2">
-                <Camera className="w-3 h-3 text-cyan-400" />
-                <span className="text-[10px] text-white font-mono uppercase">Tracking</span>
-             </div>
-             
-             {devices.length > 0 && (
+    <>
+      {/* 
+         Hidden Video Element for Processing.
+         Kept in layout (1px) to ensure browser doesn't throttle playback/processing when "hidden".
+      */}
+      <video
+        ref={videoRef}
+        className="fixed top-0 left-0 w-[1px] h-[1px] opacity-0 pointer-events-none -z-50"
+        autoPlay
+        playsInline
+        muted
+      />
+
+      <div className="fixed bottom-0 right-0 z-40 p-4 flex flex-col items-end pointer-events-none overflow-visible">
+         {/* Restore Button (Visible when minimized) */}
+         <div className={`pointer-events-auto transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] transform ${isMinimized ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0 absolute bottom-4 right-4'}`}>
+            <button 
+              onClick={() => setIsMinimized(false)}
+              className="bg-gray-900/90 text-cyan-400 p-3 rounded-full border border-cyan-500/30 hover:bg-gray-800 shadow-[0_0_15px_rgba(34,211,238,0.3)] backdrop-blur-sm flex items-center justify-center group"
+              title="Show Camera"
+            >
                <div className="relative">
-                  <select 
-                    value={selectedDeviceId}
-                    onChange={handleDeviceChange}
-                    className="w-24 text-[10px] bg-gray-800 text-white border-none rounded px-1 py-0.5 outline-none cursor-pointer hover:bg-gray-700"
-                  >
-                    {devices.map((device, idx) => (
-                      <option key={device.deviceId} value={device.deviceId}>
-                        {device.label || `Camera ${idx + 1}`}
-                      </option>
-                    ))}
-                  </select>
+                  <ChevronUp className="w-6 h-6" />
+                  <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                  </span>
                </div>
-             )}
-        </div>
+            </button>
+         </div>
 
-        <div className="relative flex-1 overflow-hidden">
-            {!isLoaded && !error && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-cyan-400">
-                <RefreshCw className="w-8 h-8 animate-spin mb-2" />
-                <span className="text-xs">Loading Model...</span>
-            </div>
-            )}
+        {/* Main Card */}
+        <div className={`pointer-events-auto relative bg-black/80 border border-gray-700 rounded-t-2xl rounded-bl-2xl overflow-hidden w-[240px] h-[220px] shadow-2xl backdrop-blur-sm flex flex-col transition-all duration-500 ease-in-out origin-bottom-right ${isMinimized ? 'translate-y-[150%] opacity-0' : 'translate-y-0 opacity-100'}`}>
+          
+          {/* Header/Controls */}
+          <div className="h-10 bg-gray-900 border-b border-gray-700 flex items-center justify-between px-3 shrink-0">
+               <div className="flex items-center gap-2">
+                  <Camera className="w-3 h-3 text-cyan-400" />
+                  <span className="text-[10px] text-white font-mono uppercase">Tracking</span>
+               </div>
+               
+               <div className="flex items-center gap-2">
+                 {devices.length > 0 && (
+                    <div className="relative">
+                        <select 
+                          value={selectedDeviceId}
+                          onChange={handleDeviceChange}
+                          className="w-20 text-[10px] bg-gray-800 text-white border-none rounded px-1 py-0.5 outline-none cursor-pointer hover:bg-gray-700"
+                        >
+                          {devices.map((device, idx) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                              {device.label ? device.label.slice(0, 10) + '...' : `Cam ${idx + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                    </div>
+                 )}
+                 
+                 <button 
+                   onClick={() => setIsMinimized(true)}
+                   className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors"
+                   title="Minimize"
+                 >
+                   <Minus className="w-3 h-3" />
+                 </button>
+               </div>
+          </div>
 
-            {error && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 p-4 text-center">
-                <span className="text-xs font-bold">{error}</span>
-            </div>
-            )}
+          <div className="relative flex-1 overflow-hidden min-h-0 bg-black">
+              {!isLoaded && !error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-cyan-400">
+                  <RefreshCw className="w-8 h-8 animate-spin mb-2" />
+                  <span className="text-xs">Loading Model...</span>
+              </div>
+              )}
 
-            {/* Video and Canvas overlay */}
-            <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]" 
-            />
-            <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
-            />
-        </div>
-        
-        <div className="bg-black/80 p-1 text-center flex flex-col gap-0.5">
-           <p className="text-[9px] text-gray-400">Swipe Hand Left/Right to Rotate</p>
+              {error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 p-4 text-center">
+                  <span className="text-xs font-bold">{error}</span>
+              </div>
+              )}
+
+              {/* Canvas overlay - Draws both video frame and landmarks */}
+              <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
+              />
+          </div>
+          
+          <div className="bg-black/80 p-1 text-center flex flex-col gap-0.5 shrink-0">
+             <p className="text-[9px] text-gray-400">Swipe Hand Left/Right to Rotate</p>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 

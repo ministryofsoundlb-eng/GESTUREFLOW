@@ -3,6 +3,7 @@ export interface PhotoItem {
   url: string;
   title: string;
   theme: string;
+  type: 'image' | 'video';
 }
 
 export enum GestureType {
